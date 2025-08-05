@@ -11,7 +11,7 @@ const commands = [
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 
 try {
-  console.log('📡 スラッシュコマンド登録中...');
+  console.log('📡 コマンド登録中...');
   await rest.put(
     Routes.applicationGuildCommands(
       process.env.APPLICATION_ID,
@@ -19,7 +19,7 @@ try {
     ),
     { body: commands }
   );
-  console.log('✅ 登録完了！');
+  console.log('✅ コマンド登録完了！');
 } catch (error) {
-  console.error('❌ エラー:', error);
+  console.error('❌ 登録失敗:', error);
 }
