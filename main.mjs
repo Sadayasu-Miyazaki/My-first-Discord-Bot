@@ -5,13 +5,18 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  REST,
+  Routes,
+  SlashCommandBuilder,
 } from 'discord.js';
 import dotenv from 'dotenv';
+import { OpenAI } from 'openai';
 dotenv.config();
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const GUILD_ID = process.env.GUILD_ID;
 const ADMIN_USER_IDS = process.env.ADMIN_USER_IDS.split(',');
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 const client = new Client({
   intents: [
@@ -23,11 +28,33 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
-client.once('ready', () => {
+const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+
+const commands = [
+  new SlashCommandBuilder()
+    .setName('chat')
+    .setDescription('ChatGPTと会話します')
+    .addStringOption(option =>
+      option.setName('message').setDescription('話しかける内容').setRequired(true)
+    ),
+].map(cmd => cmd.toJSON());
+
+const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
+
+client.once('ready', async () => {
   console.log(`${client.user.tag} でログインしました`);
+
+  try {
+    await rest.put(
+      Routes.applicationGuildCommands(client.user.id, GUILD_ID),
+      { body: commands }
+    );
+    console.log('✅ /chat コマンドを登録しました');
+  } catch (error) {
+    console.error('❌ コマンド登録に失敗:', error);
+  }
 });
 
-// 📢 管理者がBotにDM → お知らせチャンネルへ転送
 client.on('messageCreate', async message => {
   if (message.channel.type !== 1) return;
   if (message.author.bot) return;
@@ -49,7 +76,6 @@ client.on('messageCreate', async message => {
   }
 });
 
-// 🧩 新規参加処理
 client.on('guildMemberAdd', async member => {
   if (member.user.bot) return;
 
@@ -66,7 +92,6 @@ client.on('guildMemberAdd', async member => {
 
     await member.send('サーバー参加ありがとうございます！いくつか質問させてください。');
 
-    // 名前
     await member.send('① あなたの名前を教えてください（本名じゃなくてもOK）');
     const nameCollected = await member.dmChannel.awaitMessages({
       filter: m => m.author.id === member.id,
@@ -75,7 +100,6 @@ client.on('guildMemberAdd', async member => {
     });
     const userName = nameCollected.first()?.content || '未回答';
 
-    // 津賀田中学校生か
     await member.send('② あなたは津賀田中学校の生徒ですか？「はい」か「いいえ」で答えてください。');
     const schoolCollected = await member.dmChannel.awaitMessages({
       filter: m => m.author.id === member.id,
@@ -90,7 +114,6 @@ client.on('guildMemberAdd', async member => {
       return;
     }
 
-    // クラス選択
     await member.send('③ あなたのクラスを選んでください：');
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('class_1').setLabel('1組').setStyle(ButtonStyle.Primary),
@@ -123,7 +146,6 @@ client.on('guildMemberAdd', async member => {
 
       if (pendingRole) await member.roles.remove(pendingRole);
 
-      // ✅ 2人にDM送信
       for (const adminId of ADMIN_USER_IDS) {
         const adminUser = await client.users.fetch(adminId);
         await adminUser.send(
@@ -142,12 +164,32 @@ client.on('guildMemberAdd', async member => {
         member.send('時間切れのためクラス選択がキャンセルされました。もう一度やり直してください。');
       }
     });
-
   } catch (err) {
     console.error('エラー:', err);
     try {
       await member.send('エラーが発生しました。管理者に連絡してください。');
     } catch (_) {}
+  }
+});
+
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isChatInputCommand()) return;
+  if (interaction.commandName !== 'chat') return;
+
+  const userMessage = interaction.options.getString('message');
+  await interaction.deferReply();
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: [{ role: 'user', content: userMessage }],
+    });
+
+    const replyText = response.choices[0].message.content;
+    await interaction.editReply(replyText || '（空の返答）');
+  } catch (err) {
+    console.error('OpenAIエラー:', err);
+    await interaction.editReply('ChatGPTとの通信中にエラーが発生しました。');
   }
 });
 
